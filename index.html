@@ -1,1 +1,223 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Backrooms VR - Tela dos Óculos</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: sans-serif; }
+        #setup { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #fff; background: rgba(0,0,0,0.9); padding: 20px; border-radius: 8px; text-align: center; z-index: 10; border: 1px solid #ffeb3b; width: 80%; max-width: 400px; }
+        input { font-size: 18px; padding: 10px; width: 80%; text-align: center; margin-bottom: 15px; border-radius: 5px; border: 1px solid #ffeb3b; background: #222; color: #fff; }
+        button { font-size: 18px; padding: 10px 20px; background-color: #ffeb3b; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
+    </style>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.module.js",
+                "three/addons/effects/StereoEffect.js": "https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/jsm/effects/StereoEffect.js",
+                "firebase/app": "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js",
+                "firebase/database": "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js"
+            }
+        }
+    </script>
+</head>
+<body>
 
+    <div id="setup">
+        <h2>Modo VR (Papelão)</h2>
+        <p>Digite o código da partida para sincronizar o movimento:</p>
+        <input type="number" id="room-input" placeholder="Código da Sala" pattern="\d*"><br>
+        <button id="start-vr">INICIAR VR</button>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { StereoEffect } from 'three/addons/effects/StereoEffect.js';
+        import { initializeApp } from "firebase/app";
+        import { getDatabase, ref, onValue } from "firebase/database";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyCfdgkO3WzaxXT-djAA6MsLC2m26c9optU",
+            authDomain: "slider-io.firebaseapp.com",
+            databaseURL: "https://slider-io-default-rtdb.firebaseio.com",
+            projectId: "slider-io",
+            storageBucket: "slider-io.firebasestorage.app",
+            messagingSenderId: "395647141464",
+            appId: "1:395647141464:web:251cc58a3e0e90ca262c2d"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app);
+
+        let moveInput = { x: 0, y: 0 };
+        let isSprinting = false;
+
+        // Ativa o VR ao clicar no botão
+        document.getElementById('start-vr').addEventListener('click', () => {
+            const roomId = document.getElementById('room-input').value.trim();
+            if(!roomId) return;
+
+            // Escuta os comandos do Firebase vindos do OUTRO celular (Controle)
+            const roomRef = ref(db, 'rooms/' + roomId);
+            onValue(roomRef, (snapshot) => {
+                const data = snapshot.val();
+                if (data) {
+                    if (data.joystick) moveInput = data.joystick;
+                    isSprinting = data.sprint || false;
+                }
+            });
+
+            // Esconde o menu e pede tela cheia (melhor para VR)
+            document.getElementById('setup').style.display = 'none';
+            if (document.body.requestFullscreen) document.body.requestFullscreen();
+
+            // Ativa o sensor de movimento do celular (Giroscópio) para olhar ao redor
+            ativarGiroscopio();
+            initThree();
+        });
+
+        // --- SISTEMA DE ORIENTAÇÃO POR GIROSCÓPIO ---
+        let deviceRotation = { alpha: 0, beta: 0, gamma: 0 };
+        function ativarGiroscopio() {
+            if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+                DeviceOrientationEvent.requestPermission()
+                    .then(permissionState => {
+                        if (permissionState === 'granted') {
+                            window.addEventListener('deviceorientation', handleOrientation);
+                        }
+                    });
+            } else {
+                window.addEventListener('deviceorientation', handleOrientation);
+            }
+        }
+
+        function handleOrientation(event) {
+            // Guarda a rotação da cabeça do jogador
+            deviceRotation.alpha = event.alpha ? THREE.MathUtils.degToRad(event.alpha) : 0; // Olhar lados
+            deviceRotation.beta = event.beta ? THREE.MathUtils.degToRad(event.beta) : 0;   // Olhar cima/baixo
+        }
+
+        // --- ENGINE DO JOGO (CONTEÚDO IGUAL AO DO PC, MAS DUPLICADO) ---
+        let scene, camera, renderer, effect;
+        const lightsArray = [];
+
+        function initThree() {
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x1f1d14, 0.14);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 1.6, 0);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            // O TRUQUE DO VR: O StereoEffect divide a tela no meio e cria duas câmeras
+            effect = new StereoEffect(renderer);
+            effect.setSize(window.innerWidth, window.innerHeight);
+
+            // Luzes e Texturas
+            const ambientLight = new THREE.AmbientLight(0xfffae0, 0.25);
+            scene.add(ambientLight);
+
+            const textureLoader = new THREE.TextureLoader();
+            textureLoader.crossOrigin = "anonymous";
+
+            const urlChao = "https://imgs.search.brave.com/OpdtAyHXjjDAH31-lb9KyfFB406kLQVA90Ou8gR23oc/rs:fit:860:0:0:0/g:ce/aHR0cHM6Ly9iLnRo/dW1icy5yZWRkaXRt/ZWRpYS5jb20vZzFW/TG1lTXdMeXdRX2h1/bjRZOXpBbVZvSGkx/Nm9vT1IwMzN2UnBW/cmtway5qcGc";
+            const urlParede = "https://imgs.search.brave.com/JmG2Eit9CZ40HGmBCrWTgY9IdlXweFr6m_y1KrpMNWY/rs:fit:860:0:0:0/g:ce/aHR0cHM6Ly9wcmV2/aWV3LnJlZGQuaXQv/cmVhbGlzdGljLXdh/bGwtdGV4dHVyZS12/MC11eHd4dXB6M3Nn/b2cxLnBuZz93aWR0/aD0xMDI0JmZvcm1h/dD1wbmcmYXV0bz13/ZWJwJnM9NjBlZTZh/NDlhYjI0OWI0OGJk/ZTgyZDdlNWQ1NGRm/N2RmYjNlY2E0ZA";
+
+            const floorTex = textureLoader.load(urlChao);
+            floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
+            floorTex.repeat.set(25, 25);
+
+            const wallTex = textureLoader.load(urlParede);
+            wallTex.wrapS = wallTex.wrapT = THREE.RepeatWrapping;
+
+            const floorMaterial = new THREE.MeshLambertMaterial({ map: floorTex });
+            const ceilingMaterial = new THREE.MeshLambertMaterial({ color: 0xdfd8aa }); 
+
+            const geoPlane = new THREE.PlaneGeometry(50, 50);
+            const floor = new THREE.Mesh(geoPlane, floorMaterial);
+            floor.rotation.x = -Math.PI / 2;
+            scene.add(floor);
+
+            const ceiling = new THREE.Mesh(geoPlane, ceilingMaterial);
+            ceiling.rotation.x = Math.PI / 2;
+            ceiling.position.y = 3;
+            scene.add(ceiling);
+
+            // Construtor de paredes
+            function criarParede(largura, profundidade, x, z) {
+                const wallGeo = new THREE.BoxGeometry(largura, 3, profundidade);
+                const texClonada = wallTex.clone();
+                texClonada.needsUpdate = true;
+                texClonada.repeat.set(largura > profundidade ? largura / 2 : profundidade / 2, 1.5);
+                const mesh = new THREE.Mesh(wallGeo, new THREE.MeshLambertMaterial({ map: texClonada }));
+                mesh.position.set(x, 1.5, z);
+                scene.add(mesh);
+            }
+
+            // Labirinto
+            criarParede(14, 0.5, 0, -6);
+            criarParede(0.5, 12, -7, 0);
+            criarParede(10, 0.5, 5, 5);
+            criarParede(0.5, 8, 5, -2);
+            criarParede(6, 0.5, -4, 4);
+
+            // Lâmpadas
+            function criarLampada(x, z) {
+                const lampGeo = new THREE.BoxGeometry(1.6, 0.05, 0.5);
+                const lampMesh = new THREE.Mesh(lampGeo, new THREE.MeshBasicMaterial({ color: 0xfffde0 }));
+                lampMesh.position.set(x, 2.97, z);
+                scene.add(lampMesh);
+
+                const pointLight = new THREE.PointLight(0xfffcd4, 0.8, 14);
+                pointLight.position.set(x, 2.6, z);
+                scene.add(pointLight);
+                lightsArray.push({ light: pointLight, mesh: lampMesh });
+            }
+            criarLampada(0, 0);
+            criarLampada(-4, -3);
+            criarLampada(3, 3);
+
+            window.addEventListener('resize', onWindowResize);
+            animate();
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            effect.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // --- LOOP DE RENDER COM DUAS TELAS ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // 1. Aplica o movimento da cabeça (Giroscópio) na Câmera
+            // Adiciona uma rotação base para simular os eixos corretos do celular deitado nos óculos
+            camera.rotation.set(deviceRotation.beta - Math.PI/2, 0, deviceRotation.alpha, 'YXZ');
+
+            // 2. Aplica o movimento de andar/correr vindo do celular controle
+            const currentSpeed = isSprinting ? 0.14 : 0.07;
+            
+            // No VR, o analógico do controle faz o jogador andar para onde o corpo/óculos está apontando
+            camera.translateZ(-moveInput.y * currentSpeed);
+            camera.translateX(moveInput.x * currentSpeed);
+            camera.position.y = 1.6; // Trava altura dos olhos
+
+            // Piscar de luzes assustador
+            lightsArray.forEach(obj => {
+                if (Math.random() > 0.99) {
+                    const ativo = obj.light.intensity > 0;
+                    obj.light.intensity = ativo ? 0 : 0.8;
+                    obj.mesh.material.color.setHex(ativo ? 0x444433 : 0xfffde0);
+                }
+            });
+
+            // Renderiza usando o efeito Estéreo (Modo VR de duas telas)
+            effect.render(scene, camera);
+        }
+    </script>
+</body>
+</html>

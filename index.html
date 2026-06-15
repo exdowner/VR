@@ -52,12 +52,10 @@
         let moveInput = { x: 0, y: 0 };
         let isSprinting = false;
 
-        // Ativa o VR ao clicar no botão
         document.getElementById('start-vr').addEventListener('click', () => {
             const roomId = document.getElementById('room-input').value.trim();
             if(!roomId) return;
 
-            // Escuta os comandos do Firebase vindos do OUTRO celular (Controle)
             const roomRef = ref(db, 'rooms/' + roomId);
             onValue(roomRef, (snapshot) => {
                 const data = snapshot.val();
@@ -67,17 +65,15 @@
                 }
             });
 
-            // Esconde o menu e pede tela cheia (melhor para VR)
             document.getElementById('setup').style.display = 'none';
             if (document.body.requestFullscreen) document.body.requestFullscreen();
 
-            // Ativa o sensor de movimento do celular (Giroscópio) para olhar ao redor
             ativarGiroscopio();
             initThree();
         });
 
-        // --- SISTEMA DE ORIENTAÇÃO POR GIROSCÓPIO ---
-        let deviceRotation = { alpha: 0, beta: 0, gamma: 0 };
+        // --- GIROSCÓPIO ---
+        let deviceRotation = { alpha: 0, beta: 0 };
         function ativarGiroscopio() {
             if (typeof DeviceOrientationEvent.requestPermission === 'function') {
                 DeviceOrientationEvent.requestPermission()
@@ -92,14 +88,14 @@
         }
 
         function handleOrientation(event) {
-            // Guarda a rotação da cabeça do jogador
-            deviceRotation.alpha = event.alpha ? THREE.MathUtils.degToRad(event.alpha) : 0; // Olhar lados
-            deviceRotation.beta = event.beta ? THREE.MathUtils.degToRad(event.beta) : 0;   // Olhar cima/baixo
+            deviceRotation.alpha = event.alpha ? THREE.MathUtils.degToRad(event.alpha) : 0;
+            deviceRotation.beta = event.beta ? THREE.MathUtils.degToRad(event.beta) : 0;
         }
 
-        // --- ENGINE DO JOGO (CONTEÚDO IGUAL AO DO PC, MAS DUPLICADO) ---
+        // --- ENGINE THREE.JS ---
         let scene, camera, renderer, effect;
         const lightsArray = [];
+        let wallTex;
 
         function initThree() {
             scene = new THREE.Scene();
@@ -112,17 +108,16 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
             document.body.appendChild(renderer.domElement);
 
-            // O TRUQUE DO VR: O StereoEffect divide a tela no meio e cria duas câmeras
             effect = new StereoEffect(renderer);
             effect.setSize(window.innerWidth, window.innerHeight);
 
-            // Luzes e Texturas
             const ambientLight = new THREE.AmbientLight(0xfffae0, 0.25);
             scene.add(ambientLight);
 
             const textureLoader = new THREE.TextureLoader();
             textureLoader.crossOrigin = "anonymous";
 
+            // Seus links de texturas diretos atualizados
             const urlChao = "https://imgs.search.brave.com/OpdtAyHXjjDAH31-lb9KyfFB406kLQVA90Ou8gR23oc/rs:fit:860:0:0:0/g:ce/aHR0cHM6Ly9iLnRo/dW1icy5yZWRkaXRt/ZWRpYS5jb20vZzFW/TG1lTXdMeXdRX2h1/bjRZOXpBbVZvSGkx/Nm9vT1IwMzN2UnBW/cmtway5qcGc";
             const urlParede = "https://imgs.search.brave.com/JmG2Eit9CZ40HGmBCrWTgY9IdlXweFr6m_y1KrpMNWY/rs:fit:860:0:0:0/g:ce/aHR0cHM6Ly9wcmV2/aWV3LnJlZGQuaXQv/cmVhbGlzdGljLXdh/bGwtdGV4dHVyZS12/MC11eHd4dXB6M3Nn/b2cxLnBuZz93aWR0/aD0xMDI0JmZvcm1h/dD1wbmcmYXV0bz13/ZWJwJnM9NjBlZTZh/NDlhYjI0OWI0OGJk/ZTgyZDdlNWQ1NGRm/N2RmYjNlY2E0ZA";
 
@@ -130,13 +125,14 @@
             floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
             floorTex.repeat.set(25, 25);
 
-            const wallTex = textureLoader.load(urlParede);
-            wallTex.wrapS = wallTex.wrapT = THREE.RepeatWrapping;
+            // Carrega a textura da parede de forma assíncrona com segurança
+            wallTex = textureLoader.load(urlParede);
 
             const floorMaterial = new THREE.MeshLambertMaterial({ map: floorTex });
-            const ceilingMaterial = new THREE.MeshLambertMaterial({ color: 0xdfd8aa }); 
+            const ceilingMaterial = new THREE.MeshLambertMaterial({ color: 0xdfd8aa }); // Teto Amarelo Escritório
 
             const geoPlane = new THREE.PlaneGeometry(50, 50);
+            
             const floor = new THREE.Mesh(geoPlane, floorMaterial);
             floor.rotation.x = -Math.PI / 2;
             scene.add(floor);
@@ -146,25 +142,14 @@
             ceiling.position.y = 3;
             scene.add(ceiling);
 
-            // Construtor de paredes
-            function criarParede(largura, profundidade, x, z) {
-                const wallGeo = new THREE.BoxGeometry(largura, 3, profundidade);
-                const texClonada = wallTex.clone();
-                texClonada.needsUpdate = true;
-                texClonada.repeat.set(largura > profundidade ? largura / 2 : profundidade / 2, 1.5);
-                const mesh = new THREE.Mesh(wallGeo, new THREE.MeshLambertMaterial({ map: texClonada }));
-                mesh.position.set(x, 1.5, z);
-                scene.add(mesh);
-            }
-
-            // Labirinto
+            // Gerador do labirinto chamando a nova função protegida
             criarParede(14, 0.5, 0, -6);
             criarParede(0.5, 12, -7, 0);
             criarParede(10, 0.5, 5, 5);
             criarParede(0.5, 8, 5, -2);
             criarParede(6, 0.5, -4, 4);
 
-            // Lâmpadas
+            // Gerador de Lâmpadas Fluorescentes
             function criarLampada(x, z) {
                 const lampGeo = new THREE.BoxGeometry(1.6, 0.05, 0.5);
                 const lampMesh = new THREE.Mesh(lampGeo, new THREE.MeshBasicMaterial({ color: 0xfffde0 }));
@@ -176,12 +161,40 @@
                 scene.add(pointLight);
                 lightsArray.push({ light: pointLight, mesh: lampMesh });
             }
+            
             criarLampada(0, 0);
             criarLampada(-4, -3);
             criarLampada(3, 3);
+            criarLampada(-3, 3);
 
             window.addEventListener('resize', onWindowResize);
             animate();
+        }
+
+        // --- SISTEMA BLINDADO CONTRA TEXTURE UNDEFINED ---
+        function criarParede(largura, profundidade, x, z) {
+            const wallGeo = new THREE.BoxGeometry(largura, 3, profundidade);
+            const matPadrao = new THREE.MeshLambertMaterial({ color: 0xdfd8aa }); // Cor base amarela enquanto carrega
+            const mesh = new THREE.Mesh(wallGeo, matPadrao);
+            mesh.position.set(x, 1.5, z);
+            scene.add(mesh);
+
+            function aplicarTextura() {
+                if (wallTex && wallTex.image) {
+                    const texClonada = wallTex.clone();
+                    texClonada.wrapS = THREE.RepeatWrapping;
+                    texClonada.wrapT = THREE.RepeatWrapping;
+                    texClonada.repeat.set(largura > profundidade ? largura / 2 : profundidade / 2, 1.5);
+                    texClonada.needsUpdate = true;
+
+                    mesh.material.map = texClonada;
+                    mesh.material.color.setHex(0xffffff); // Tira o tom amarelado pra mostrar a textura real
+                    mesh.material.needsUpdate = true;
+                } else {
+                    setTimeout(aplicarTextura, 100); // Tenta de novo em 100ms se a imagem ainda for undefined
+                }
+            }
+            aplicarTextura();
         }
 
         function onWindowResize() {
@@ -190,23 +203,21 @@
             effect.setSize(window.innerWidth, window.innerHeight);
         }
 
-        // --- LOOP DE RENDER COM DUAS TELAS ---
+        // --- LOOP VR ---
         function animate() {
             requestAnimationFrame(animate);
 
-            // 1. Aplica o movimento da cabeça (Giroscópio) na Câmera
-            // Adiciona uma rotação base para simular os eixos corretos do celular deitado nos óculos
+            // Giroscópio movendo a câmera dos óculos
             camera.rotation.set(deviceRotation.beta - Math.PI/2, 0, deviceRotation.alpha, 'YXZ');
 
-            // 2. Aplica o movimento de andar/correr vindo do celular controle
+            // Velocidade dinâmica integrada com o Sprint do controle
             const currentSpeed = isSprinting ? 0.14 : 0.07;
             
-            // No VR, o analógico do controle faz o jogador andar para onde o corpo/óculos está apontando
             camera.translateZ(-moveInput.y * currentSpeed);
             camera.translateX(moveInput.x * currentSpeed);
-            camera.position.y = 1.6; // Trava altura dos olhos
+            camera.position.y = 1.6; 
 
-            // Piscar de luzes assustador
+            // Efeito de piscar as lâmpadas do teto
             lightsArray.forEach(obj => {
                 if (Math.random() > 0.99) {
                     const ativo = obj.light.intensity > 0;
@@ -215,7 +226,6 @@
                 }
             });
 
-            // Renderiza usando o efeito Estéreo (Modo VR de duas telas)
             effect.render(scene, camera);
         }
     </script>
